@@ -14,12 +14,13 @@ limitations under the License.
 """
 
 from typing import Any, Callable, List, Optional, TypeVar
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from durabletask import task
 
 from dapr.ext.workflow.workflow_context import WorkflowContext, Workflow
 from dapr.ext.workflow.workflow_activity_context import WorkflowActivityContext
+from dapr.ext.workflow.task import RetryPolicy
 
 T = TypeVar('T')
 TInput = TypeVar('TInput')
@@ -52,16 +53,23 @@ class DaprWorkflowContext(WorkflowContext):
         return self.__obj.create_timer(fire_at)
 
     def call_activity(self, activity: Callable[[WorkflowActivityContext, TInput], TOutput], *,
-                      input: TInput = None) -> task.Task[TOutput]:
-        return self.__obj.call_activity(activity=activity.__name__, input=input)
+                      input: TInput = None, retry_policy: Optional[RetryPolicy] = None) -> task.Task[TOutput]:
+        if retry_policy is None:
+            return self.__obj.call_activity(activity=activity.__name__, input=input)
+        return self.__obj.call_activity(activity=activity.__name__, input=input, 
+                                        retry_policy=retry_policy.__obj)
 
     def call_child_workflow(self, workflow: Workflow, *,
                             input: Optional[TInput],
-                            instance_id: Optional[str]) -> task.Task[TOutput]:
+                            instance_id: Optional[str],
+                            retry_policy: Optional[RetryPolicy] = None) -> task.Task[TOutput]:
         def wf(ctx: task.OrchestrationContext, inp: TInput):
             daprWfContext = DaprWorkflowContext(ctx)
             return workflow(daprWfContext, inp)
-        return self.__obj.call_sub_orchestrator(wf, input=input, instance_id=instance_id)
+        if retry_policy is None:
+            return self.__obj.call_sub_orchestrator(wf, input=input, instance_id=instance_id)
+        return self.__obj.call_sub_orchestrator(wf, input=input, instance_id=instance_id,
+                                                retry_policy=retry_policy.__obj)
 
     def wait_for_external_event(self, name: str) -> task.Task:
         return self.__obj.wait_for_external_event(name)
@@ -79,3 +87,4 @@ def when_all(tasks: List[task.Task[T]]) -> task.WhenAllTask[T]:
 def when_any(tasks: List[task.Task]) -> task.WhenAnyTask:
     """Returns a task that completes when any of the provided tasks complete or fail."""
     return task.when_any(tasks)
+
